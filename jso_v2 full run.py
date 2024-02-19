@@ -2,21 +2,25 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
+from scipy.spatial.distance import pdist
+
 import sys
 import os
 import multiprocessing as mp
 
 import json
 import time
-from scipy.spatial.distance import pdist
+import logging
 
 from CEC2022 import cec2022_func
 
 
-def jso(objective, dim, verbose=0, verbose_period=1000, save_stats=False, known_opt = None, save_convergence=True):
+def jso(objective, dim, verbose=0, verbose_period=1000, save_stats=False, known_opt=None, save_convergence=True):
     '''
         jSO based on the original algorithm
     '''
+    # region all variables and arrays
+
     # dim = 10 and 20
     # NFES = 200000 and 1000000
     if (dim == 10):
@@ -77,7 +81,7 @@ def jso(objective, dim, verbose=0, verbose_period=1000, save_stats=False, known_
         population_std = []
         population_median = []
         population_max = []
-    
+
     if (save_convergence):
         convergence_objective = np.zeros(NFES_max)
         convergence_diversityP = np.zeros(NFES_max)
@@ -88,6 +92,10 @@ def jso(objective, dim, verbose=0, verbose_period=1000, save_stats=False, known_
     generation_counter = 0
     archive_size = 0
     NFES = 0
+
+    # endregion all variables and arrays
+
+    # region initialization
 
     # initialization. Random uniform in the search space
     # i - individual, j - dimension
@@ -109,10 +117,13 @@ def jso(objective, dim, verbose=0, verbose_period=1000, save_stats=False, known_
             convergence_diversityP[NFES] = np.nan
         NFES += 1
 
-    # main loop
+    # endregion initialization
+
+    # region main loop
     verbose_by_generation = False
     accuracy_is_reached = False
     while True:
+        # region population size reduction
         p_best = (p_best_max-p_best_min)*NFES/NFES_max + p_best_min
         delta_F = np.array([])
         success_F = np.array([])
@@ -141,9 +152,11 @@ def jso(objective, dim, verbose=0, verbose_period=1000, save_stats=False, known_
                     archive = [archive[j]
                                for j in arch_sorted_idxs[0:(len(archive)-A_remove)]]
                     archive_size = A_size
+        # endregion population size reduction
 
-        # one generation loop begin
+        # region one generation loop
         for i in range(NP):
+            # region get all values from distributions
             r_memory = np.random.randint(0, H_size)
             M_F = Memory_F[r_memory]
             M_Cr = Memory_Cr[r_memory]
@@ -169,8 +182,9 @@ def jso(objective, dim, verbose=0, verbose_period=1000, save_stats=False, known_
                 F_w = 0.8*F
             else:
                 F_w = 1.2*F
+            # endregion get all values from distributions
 
-            # mutation
+            # region mutation
             ind_sort = np.argsort(fitness_population)
             ind_sort = np.delete(ind_sort, np.argwhere(ind_sort == i))
             x_pbest = population[ind_sort[p_best_val]]
@@ -199,8 +213,10 @@ def jso(objective, dim, verbose=0, verbose_period=1000, save_stats=False, known_
                     exit()
             diff2 = F*(x_r1 - x_r2)
             mutant = population[i] + diff1 + diff2
+            # endregion mutation
 
-            # crossover bin
+            # region crossover, bound, fitness
+            # TODO: bin, ...
             jrand = np.random.randint(0, dim)
             crossover_mask = (np.random.uniform(0, 1, dim) < Cr)
             crossover_mask[jrand] == True
@@ -215,8 +231,9 @@ def jso(objective, dim, verbose=0, verbose_period=1000, save_stats=False, known_
             # func_val = fitness.values(trial)
             trial_fitness = func_val.ObjFunc[0]
             NFES += 1
+            # endregion crossover, bound, fitness
 
-            # success saves
+            # region success saves
             if (trial_fitness < fitness_population[i]):
                 if (A_type == 1):
                     archive.append(population[i])
@@ -249,8 +266,9 @@ def jso(objective, dim, verbose=0, verbose_period=1000, save_stats=False, known_
                         improvement_counter_r2inP += 1
                     else:
                         improvement_counter_r2inA += 1
+            # endregion success saves
 
-            # selection
+            # region selection
             if (trial_fitness <= fitness_population[i]):
                 population[i] = trial
                 fitness_population[i] = trial_fitness
@@ -264,49 +282,61 @@ def jso(objective, dim, verbose=0, verbose_period=1000, save_stats=False, known_
                 if (len(archive) == 0):
                     convergence_diversityA[NFES-1] = np.nan
                 else:
-                    convergence_diversityA[NFES-1] = np.mean(np.sum(pdist(archive)))
-                convergence_diversityP[NFES-1] = np.mean(np.sum(pdist(population)))
+                    convergence_diversityA[NFES -
+                                           1] = np.mean(np.sum(pdist(archive)))
+                convergence_diversityP[NFES -
+                                       1] = np.mean(np.sum(pdist(population)))
+            # endregion selection
 
-            # save errors in checkpoints
-            if(known_opt != None):
+            # region save errors in checkpoints
+            if (known_opt != None):
                 val_error = best_found_value - known_opt
-                if(NFES >= FES_checkpoints[counter_checkpoints]):
+                if (NFES >= FES_checkpoints[counter_checkpoints]):
                     error_checkpoints[counter_checkpoints] = val_error
                     counter_checkpoints += 1
                 # check error < 1E-08
-                if(val_error < 1E-08):
+                if (val_error < 1E-08):
                     for i in range(counter_checkpoints, 16):
                         error_checkpoints[i] = 1E-08
                     error_checkpoints[16] = NFES
                     accuracy_is_reached = True
-                    break
-            
-            # check NFES budget
+                    break  # break for
+            # endregion save errors in checkpoints
+
+            # region check NFES budget
             if (NFES >= NFES_max):
                 error_checkpoints[16] = NFES_max
                 accuracy_is_reached = True
                 break  # break for
+            # endregion check NFES budget
 
-            # verbose by NFES
-            if(verbose_by_generation == False):
-                if ((verbose > 0) and ((NFES % verbose_period) == 0)): # FES verbose
+            # region verbose by NFES
+            if (verbose_by_generation == False):
+                if ((verbose > 0) and ((NFES % verbose_period) == 0)):  # FES verbose
                     print("# Generation:", generation_counter, "NFES:", NFES)
                     print("  best_found_value:", best_found_value)
                     print("  best_found_solution:", best_found_solution)
                     print("  best_found_NFES:", best_found_NFES)
                     print("  best_found_generation:", best_found_generation)
-                if((verbose == 0) and ((NFES % verbose_period) == 0)): # FES verbose
-                    print("# Generation:", generation_counter, "NFES:", NFES, "# from PID", os.getpid())
+                if ((verbose == 0) and ((NFES % verbose_period) == 0)):  # FES verbose
+                    print("# Generation:", generation_counter,
+                          "NFES:", NFES, "# from PID", os.getpid())
+            # endregion verbose by NFES
+        # endregion one generation loop
 
-        # one generation loop end
+        # region one generation loop end
         generation_counter += 1
-        if(accuracy_is_reached):
+        if (accuracy_is_reached):
             if (save_convergence):
-                max_divA = np.max(convergence_diversityA)
-                convergence_diversityA = np.where(~np.isnan(convergence_diversityA),convergence_diversityA, max_divA)
-                max_divP = np.max(convergence_diversityP)
-                convergence_diversityP = np.where(~np.isnan(convergence_diversityP),convergence_diversityP, max_divP)
-                if(NFES<NFES_max):
+                max_divA = np.max(
+                    convergence_diversityA[~np.isnan(convergence_diversityA)])
+                convergence_diversityA = np.where(
+                    ~np.isnan(convergence_diversityA), convergence_diversityA, max_divA)
+                max_divP = np.max(
+                    convergence_diversityP[~np.isnan(convergence_diversityP)])
+                convergence_diversityP = np.where(
+                    ~np.isnan(convergence_diversityP), convergence_diversityP, max_divP)
+                if (NFES < NFES_max):
                     rest = NFES_max - NFES
                     last_divA = convergence_diversityA[NFES-1]
                     last_divP = convergence_diversityP[NFES-1]
@@ -315,19 +345,22 @@ def jso(objective, dim, verbose=0, verbose_period=1000, save_stats=False, known_
                         convergence_diversityA[NFES+i] = last_divA
                         convergence_diversityP[NFES+i] = last_divP
             break
+        # endregion one generation loop end
 
-        # verbose by generations
-        if(verbose_by_generation == True):
-            if ((verbose > 0) and ((generation_counter % verbose_period) == 0)): # generation verbose
+        # region verbose by generations
+        if (verbose_by_generation == True):
+            if ((verbose > 0) and ((generation_counter % verbose_period) == 0)):  # generation verbose
                 print("# Generation:", generation_counter, "NFES:", NFES)
                 print("  best_found_value:", best_found_value)
                 print("  best_found_solution:", best_found_solution)
                 print("  best_found_NFES:", best_found_NFES)
                 print("  best_found_generation:", best_found_generation)
-            if((verbose == 0) and ((generation_counter % verbose_period) == 0)): # generation verbose
-                print("# Generation:", generation_counter, "NFES:", NFES, "# from PID", os.getpid())
+            if ((verbose == 0) and ((generation_counter % verbose_period) == 0)):  # generation verbose
+                print("# Generation:", generation_counter,
+                      "NFES:", NFES, "# from PID", os.getpid())
+        # endregion verbose by generations
 
-        # all updates
+        # region all updates
         if (success_F.shape[0] > 0):
             sum_delta_F = np.sum(delta_F)
             weights = delta_F/sum_delta_F
@@ -342,8 +375,9 @@ def jso(objective, dim, verbose=0, verbose_period=1000, save_stats=False, known_
                 memory_counter += 1
             else:
                 memory_counter = 0
+        # endregion all updates
 
-        # reduce archive size
+        # region reduce archive size
         if (A_type == 1):
             if (len(archive) > A_size):
                 idxs = np.random.choice(len(archive), A_size, replace=False)
@@ -352,8 +386,10 @@ def jso(objective, dim, verbose=0, verbose_period=1000, save_stats=False, known_
                 archive_fitness = archive_fitness[idxs]
                 archive_size = A_size
             elif (A_type == 2):
-                pass  # no action is requred.
+                pass  # no action is requred
+        # endregion reduce archive size
 
+        # region save statistics
         if (save_stats):
             if (len(archive) == 0):
                 archive_mean_dist.append(np.nan)
@@ -370,8 +406,11 @@ def jso(objective, dim, verbose=0, verbose_period=1000, save_stats=False, known_
             population_std.append(np.std(fitness_population))
             population_median.append(np.median(fitness_population))
             population_max.append(np.max(fitness_population))
+        # endregion save statistics
+    # endregion main loop
 
-    if(verbose > 0):
+    # region final messages
+    if (verbose > 0):
         print()
         print("############")
         print("jSO results:")
@@ -379,9 +418,10 @@ def jso(objective, dim, verbose=0, verbose_period=1000, save_stats=False, known_
         print("  best_found_solution:", best_found_solution)
         print("  best_found_NFES:", best_found_NFES)
         print("  best_found_generation:", best_found_generation)
+    # endregion final messages
 
+    # region create dictionary with the results and return
     if (save_stats):
-        # create dictionary
         result_dictionary = {
             "best_found_value": best_found_value,
             "best_found_solution": best_found_solution,
@@ -401,7 +441,7 @@ def jso(objective, dim, verbose=0, verbose_period=1000, save_stats=False, known_
             "population_max": population_max
         }
     else:
-        if(known_opt):
+        if (known_opt):
             result_dictionary = {
                 "best_found_value": best_found_value,
                 "best_found_solution": [best_found_solution],
@@ -420,100 +460,138 @@ def jso(objective, dim, verbose=0, verbose_period=1000, save_stats=False, known_
                 "best_found_generation": best_found_generation
             }
     return result_dictionary
+    # endregion create dictionary with the results and return
+
 
 def single_worker(f_num, optimum, dim, shared_list, ID):
-
     print("  Worker", ID, 'starts', "PID", os.getpid())
+    logging.debug("Worker "+str(ID)+' starts. PID is' + str(os.getpid()))
     problem = cec2022_func(func_num=f_num)
-    results = jso(problem, dim, verbose=0, verbose_period=25000, 
+    results = jso(problem, dim, verbose=0, verbose_period=25000,
                   save_stats=False, known_opt=optimum)
     shared_list.append(results)
     print("  Worker", ID, 'stops')
+    logging.debug("Worker "+str(ID)+' stops.')
 
 
 if __name__ == "__main__":
 
+    # region set all variables
     cec2022_func_num = 1  # F1-F12
     known_opts = [300, 400, 600, 800, 900,
                   1800, 2000, 2200,
                   2300, 2400, 2600, 2700]
 
     dim = 10  # 10 and 20
-    
-    nruns = 1  # 30 for CEC2022 rules
+
+    nruns = 30  # 30 for CEC2022 rules
     bf = np.zeros(nruns)
 
     A_type = 1
     N_reduce = 'lin'
 
-    mp_mode = False
+    mp_mode = True
+
+    logging.basicConfig(filename="jso_cec2022_runs.log", filemode="w",
+                        format="%(asctime)s %(levelname)s %(message)s",
+                        level=logging.DEBUG)
+    # endregion set all variables
 
     # TODO: try 1 and 2
-    for problem in range(1):
+    for problem in range(2):
 
+        # region some verbose
+        print()
         print("##########################################")
         print("###  FUNCTION:", problem+1)
         print("##########################################")
         print()
-        
+        logging.info("### CEC2022 problem: "+str(problem+1)+".")
+
         df_stat = pd.DataFrame()
         cec2022_func_num = problem+1
+        # endregion some verbose
 
         try:
+            # region MP run
             if (mp_mode):
+                # region get CPU and set the number of MP cycles
                 ncpu = mp.cpu_count()
-                if(ncpu<=1):
+                if (ncpu <= 1):
                     print('ERROR. Run in non MP mode!')
+                    logging.error("Can't run in MP mode. num_cpu < 1.")
                     sys.exit()
                 n_mp_cycles = nruns // ncpu
-                n_mp_rest = nruns%ncpu
+                n_mp_rest = nruns % ncpu
                 print("### MP mode runs.")
                 print("### Total runs:", nruns)
-                if(n_mp_rest>0):
-                    print("### MP cycles:", n_mp_cycles+1)
+                if (n_mp_rest > 0):
+                    print("### MP cycles:", n_mp_cycles,
+                          "using all CPU and 1 cycle for", n_mp_rest, "runs")
+                    logging.info("MP mode starts. Total runs: "+str(nruns) + ". MP full cycles: "+str(
+                        n_mp_cycles)+". Additional cycle for the remaining "+str(n_mp_rest)+" runs.")
                 else:
-                    print("### MP cycles:", n_mp_cycles)
+                    print("### MP cycles:", n_mp_cycles, "using all CPU")
+                    logging.info("MP mode starts. Total runs: "+str(nruns) +
+                                 ". MP full cycles: "+str(n_mp_cycles)+".")
                 print()
-                
-                for i_mp in range(n_mp_cycles):
-                    with mp.Manager() as manager:
+                # endregion get CPU and set the number of MP cycles
+
+                with mp.Manager() as manager:
+                    shared_list = manager.list()
+                    # region mp cycles using all cpu cores
+                    for i_mp in range(n_mp_cycles):
                         print("MP_LOOP", i_mp+1, "starts...")
-                        shared_list = manager.list()
+                        logging.info("MP_LOOP "+str(i_mp+1)+" starts...")
                         mp_pool = []
                         for i in range(ncpu):
-                            mp_pool.append(mp.Process(target=single_worker, args=(cec2022_func_num, 
-                                                                                known_opts[cec2022_func_num-1], 
-                                                                                dim, shared_list, i+1)))
+                            mp_pool.append(mp.Process(target=single_worker, args=(cec2022_func_num,
+                                                                                  known_opts[cec2022_func_num-1],
+                                                                                  dim, shared_list, i+1)))
                         mp_cycle_start = time.time()
                         for i in range(ncpu):
                             mp_pool[i].start()
                         for i in range(ncpu):
                             mp_pool[i].join()
-                        print("MP_LOOP", i_mp+1, "Runtime:", (time.time()-mp_cycle_start))
-                        for l in shared_list:
-                            df_stat = pd.concat([df_stat, pd.DataFrame(l)], ignore_index=True)
+                        mp_cycle_stop = time.time()-mp_cycle_start
+                        print("MP_LOOP", i_mp+1, "Runtime:", mp_cycle_stop)
+                        logging.info("MP_LOOP "+str(i_mp+1) +
+                                     " runtime: " + str(mp_cycle_stop)+".")
                         for i in range(ncpu):
                             mp_pool[i].close()
+                    # endregion mp cycles using all cpu cores
 
-                if(n_mp_rest>0):
-                    with mp.Manager() as manager:
+                    # region mp final cycle with the rest of runs
+                    if (n_mp_rest > 0):
                         print("MP_LOOP", n_mp_cycles+1, "starts...")
-                        shared_list = manager.list()
-                    mp_pool = []
-                    for i in range(n_mp_rest):
-                        mp_pool.append(mp.Process(target=single_worker, args=(cec2022_func_num, 
-                                                                            known_opts[cec2022_func_num-1], 
-                                                                            dim, shared_list, i+1)))
-                    mp_cycle_start = time.time()
-                    for i in range(n_mp_rest):
-                        mp_pool[i].start()
-                    for i in range(n_mp_rest):
-                        mp_pool[i].join()
-                    print("MP_LOOP", n_mp_cycles+1, "Runtime:", (time.time()-mp_cycle_start))
+                        logging.info(
+                            "MP_LOOP "+str(n_mp_cycles+1)+" starts...")
+                        mp_pool = []
+                        for i in range(n_mp_rest):
+                            mp_pool.append(mp.Process(target=single_worker, args=(cec2022_func_num,
+                                                                                  known_opts[cec2022_func_num-1],
+                                                                                  dim, shared_list, i+1)))
+                        mp_cycle_start = time.time()
+                        for i in range(n_mp_rest):
+                            mp_pool[i].start()
+                        for i in range(n_mp_rest):
+                            mp_pool[i].join()
+                        mp_cycle_stop = time.time()-mp_cycle_start
+                        print("MP_LOOP", n_mp_cycles+1,
+                              "Runtime:", mp_cycle_stop)
+                        logging.info("MP_LOOP "+str(n_mp_cycles+1) +
+                                     " runtime: " + str(mp_cycle_stop)+".")
+                        for i in range(n_mp_rest):
+                            mp_pool[i].close()
+                    # endregion mp final cycle with the rest of runs
+
+                    # region save results to dataframe
                     for l in shared_list:
-                        df_stat = pd.concat([df_stat, pd.DataFrame(l)], ignore_index=True)
-                    for i in range(n_mp_rest):
-                        mp_pool[i].close()
+                        df_stat = pd.concat(
+                            [df_stat, pd.DataFrame(l)], ignore_index=True)
+                    # endregion save results to dataframe
+            # endregion MP run
+            # region single run using 1 cpu
             else:
                 problem = cec2022_func(func_num=cec2022_func_num)
                 for i in range(nruns):
@@ -521,18 +599,26 @@ if __name__ == "__main__":
                     print()
                     print("#### RUN", i+1, "starts ####")
                     start_time = time.time()
-                    results = jso(problem, dim, 0, 500, save_stats=False, known_opt=known_opts[cec2022_func_num-1])
+                    results = jso(problem, dim, 0, 500, save_stats=False,
+                                  known_opt=known_opts[cec2022_func_num-1])
                     stop_time = time.time()
-                    df_stat = pd.concat([df_stat, pd.DataFrame(results)], ignore_index=True)
+                    df_stat = pd.concat(
+                        [df_stat, pd.DataFrame(results)], ignore_index=True)
                     bf[i] = results['best_found_value']
                     print("Best Found =", bf[i])
                     print("runtime ", (stop_time - start_time))
                     print()
+            # endregion single run using 1 cpu
 
+            # region save results to json file
             save_results = True
-            if(save_results):
+            if (save_results):
                 file_name = "jso_F" + str(cec2022_func_num) + "_D" + str(dim) + \
                     "_Atype" + str(A_type) + "_" + N_reduce + ".json"
                 df_stat.to_json(file_name)
+                logging.info("File with results is saved: " + file_name)
+            # endregion save results to json file
         except Exception:
             print("ERROR: the run failed for function:", problem+1)
+            logging.error(
+                "ERROR: the run failed for function: "+str(problem+1)+".")
