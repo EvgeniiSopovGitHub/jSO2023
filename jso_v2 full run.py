@@ -33,8 +33,8 @@ def jso(objective, dim, verbose=0, verbose_period=1000, save_stats=False, known_
     lb, rb = -100., 100.
     fitness = objective
 
-    A_type = 1  # standard, adds the loser, reduce A if it out if the size
-    # A_type = 2  # diversity save, the closes in A is substituted
+    # A_type = 1  # standard, adds the loser, reduce A if it out if the size
+    A_type = 2  # diversity save, the closes in A is substituted
 
     # TODO: PSR_type = 'nl', None
     PSR_type = 'lin'
@@ -487,7 +487,7 @@ if __name__ == "__main__":
     nruns = 30  # 30 for CEC2022 rules
     bf = np.zeros(nruns)
 
-    A_type = 1
+    A_type = 2
     N_reduce = 'lin'
 
     mp_mode = True
@@ -498,18 +498,19 @@ if __name__ == "__main__":
     # endregion set all variables
 
     # TODO: try 1 and 2
-    for problem in range(2):
+    for problem in range(6):
+        
+        cec2022_func_num = problem+1+6
 
         # region some verbose
         print()
         print("##########################################")
-        print("###  FUNCTION:", problem+1)
+        print("###  FUNCTION:", cec2022_func_num)
         print("##########################################")
         print()
-        logging.info("### CEC2022 problem: "+str(problem+1)+".")
+        logging.info("### CEC2022 problem: "+str(cec2022_func_num)+".")
 
         df_stat = pd.DataFrame()
-        cec2022_func_num = problem+1
         # endregion some verbose
 
         try:
